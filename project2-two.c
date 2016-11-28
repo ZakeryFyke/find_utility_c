@@ -12,17 +12,15 @@ by the existance of a -d flag.
 Example: ./find -w testdir -n test3 -d will delete all files named "test3" in testdir and its subdirectories.
 ./find -mmin -10 will list all file paths in the current working directory and its subdirectories to files which have
 been modified in the last 10 minutes. 
-Note: This function will only consider one criteria for search, e.g. ./find -w testdir -n test3 -mmin -10 will search for
-a file named test3 in testdir and its subdirectories, but will not consider the modification time. 
+Note: This function will only consider one criteria for search, e.g. ./find -w testdir -n test3 -mmin -10 will search for a file named test3 in testdir and its subdirectories, but will not consider the modification time. 
 
 
-Output: If Action is not given: The file path to all files which match the given criteria within the file path of the given 
-directory or its subdirectories. 
+Output: If Action is not given: The file path to all files which match the given criteria within the file path of the given directory or its subdirectories. 
 If Action is given: All files matching criteria will be removed from the given directory and all its sub directories.
 A message will also print confirming which file has been deleted. 
+Note: project2-two.c cannot be removed by itself, an ignore message will print.
 
-If no directory is specified, then the current working directory will be used. If no criteria is specified, all file paths
-will be listed. 
+If no directory is specified, then the current working directory will be used. If no criteria is specified, all file paths will be listed or deleted.
 */
 
 #include <stdlib.h>
@@ -47,11 +45,36 @@ void get_output(char * file_path, struct dirent* sub_dirp, int delete){
 	}
 }
 
+void time_handler(char * file_path, struct dirent* sub_dirp, int delete, char *crit, char * criteria){
+	long val;
+	val = atoi(crit); //This is the integer value of the criteria passed, e.g. 10 instead of +10 or -10
+	struct stat buf; //define a file status structure
+	stat(file_path, &buf);
+	
+	time_t modified_time = buf.st_mtime;
+	time_t current_time = time(NULL); //Current time in seconds since the 1970 epoch
+	long elapsed_time = difftime(current_time, modified_time)/60; //get the time since the file was modified in minutes
+	
+	
+	if(strchr(criteria, '+') != NULL){ //If criteria begins with '+', print all paths of files which were modified more than criteria minutes ago
+		if(elapsed_time > val){
+			get_output(file_path, sub_dirp, delete);
+		}
+	}else if(strchr(criteria,'-')!= NULL){ //If criteria begins with '-', print all paths of files which were modified less than criteria minutes ago
+		if(elapsed_time < val){
+			get_output(file_path, sub_dirp, delete);
+		}
+	}else{
+		if(elapsed_time == atoi(criteria)){ //otherwise rpint all paths of files which were modified exactly criteria minutes ago
+			get_output(file_path, sub_dirp, delete);
+		}
+	}
+}
+
 void find(char * sub_dir, char * criteria, char * field, int delete){
 
 	DIR *sub_dp = opendir(sub_dir);//open a directory stream
 	struct dirent * sub_dirp;//define
-	struct stat buf;//define a file status structure
 	char temp1[PATH_MAX]=".";
 	char temp2[PATH_MAX]="..";
 	char temp3[PATH_MAX]="/";
@@ -60,6 +83,8 @@ void find(char * sub_dir, char * criteria, char * field, int delete){
 	long val;
 	char *crit= criteria; //Used in the case of time based search
 	crit++; //Drop the first character in criteria (+ or -)
+	
+	
 	if(sub_dp!=NULL){ //Check if the directory opened successfully 
 
 		while((sub_dirp=readdir(sub_dp))!=NULL){ //until we've read every entry one by one
@@ -73,7 +98,7 @@ void find(char * sub_dir, char * criteria, char * field, int delete){
 				temp_sub = strcat(temp_sub, temp); 
 
 				
-				//now you can add the / in front of the entry's name
+				//now you can add the '/' in front of the entry's name
 				char* temp_full_path=malloc(sizeof(char)*2000); //Create a variable to hold the full path
 				
 				//Place the passed directory at the front of the path and add the name of the file to the end
@@ -85,8 +110,7 @@ void find(char * sub_dir, char * criteria, char * field, int delete){
 
 				//if not null, we've found a subdirectory, otherwise it's a file
 				if(subsubdp!=NULL){
-					//close the stream because it'll be reopened in the recursive call.
-					closedir(subsubdp);
+					closedir(subsubdp); //Close stream, it'll be reopened in the recusive call. 
 					find(temp_full_path,criteria, field, delete);//call the recursive function call.
 				}else{
 					
@@ -94,59 +118,41 @@ void find(char * sub_dir, char * criteria, char * field, int delete){
 						if(strcmp(sub_dirp ->d_name, criteria) == 0){ //If and only if a match has been found
 							get_output(temp_full_path, sub_dirp, delete);
 						}
+
 					}else if(strcmp(field, "inode") == 0){ //if inode is given as the criteria
 						sprintf(inode, "%d", sub_dirp->d_ino);
 						if(strcmp(inode, criteria) == 0){
 							get_output(temp_full_path, sub_dirp, delete);
 						}
+
 					}else if(strcmp(field, "mmin") == 0){ //if mmin is given as the criteria
-						
-						stat(temp_full_path, &buf); //Get time when the file was last modified in seconds
-						time_t modified_time = buf.st_mtime;
+						time_handler(temp_full_path, sub_dirp, delete, crit, criteria);
 
-						time_t current_time; //Get the current time in seconds
-						current_time = time(NULL);
-						long elapsed_time = difftime(current_time, modified_time)/60; //get the time since the file was modified in minutes
-						val = atoi(crit); //This is the integer value of the criteria passed, e.g. 10 instead of +10 or -10.
-
-						if(strchr(criteria, '+')!= NULL){ //If criteria begins with '+', print all paths of files which were modified more than criteria minutes ago
-							if(elapsed_time > val){
-								get_output(temp_full_path, sub_dirp, delete);
-							}	
-						}else if(strchr(criteria, '-')!= NULL){ //If criteria begins with '-', print all paths of files which were modified less than criteria minutes ago
-							if(elapsed_time < val){
-								get_output(temp_full_path, sub_dirp, delete);
-							}
-						}else{
-							if(elapsed_time == atoi(criteria)){ //Otherwise print all paths of files which were modified exactly criteria minutes ago
-								get_output(temp_full_path, sub_dirp, delete);
-							}
-						}
 					}else{ //If no criteria is given, print every path or delete everything.
 						get_output(temp_full_path, sub_dirp, delete);
 					}
+
 				}
 			}
 		}//end of while loop
 		closedir(sub_dp);//close the stream
-	}else{
+	}else{ //If the directory doesn't exist
 		printf("cannot open directory\n");
 		exit(2);
 	}
 }				
+
+//Code for obtaining inputs below was provided by Dr. Yong Chen of Texas Tech University
 
 int 
 main(int argc, char **argv){
 	int w=0, n=0, m=0, i=0, a=0, d=0, delete = 0;
 	char  *where, *name, *mmin, *inum, *action;
 	while (1) {
-		char		c;
-
-		c = getopt(argc, argv, "w:n:m:i:a:d");	/* A colon (‘:’) to
-							 * indicate that it
-							 * takes a required
-							 * argument, e.g, -w
-							 * testdir */
+		char c;
+		//A colon indicates that it requires an argument afterwards, eg -w testdir
+		c = getopt(argc, argv, "w:n:m:i:a:d");
+							 							 		 			 
 		if (c == -1) {
 			/* We have finished processing all the arguments. */
 			break;
